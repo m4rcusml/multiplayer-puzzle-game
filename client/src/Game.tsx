@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import io, { type Socket } from 'socket.io-client'
 import { Piece, type PuzzlePiece } from './components/piece'
+import { socketEndpoint } from './socket'
 
 const piecesAtStart: PuzzlePiece[] = [
   { id: '1', x: .15, y: .2, targetX: .25, targetY: .25, color: '#ef6c6c', locked: false },
@@ -74,7 +75,7 @@ export default function Game() {
       <div className="toolbar">
         <span>{pieces.filter(piece => piece.locked).length}/{pieces.length} peças</span>
         {!socket
-          ? <button onClick={() => setSocket(io('http://localhost:3000'))}>Conectar</button>
+          ? <button onClick={() => setSocket(io(socketEndpoint()))}>Conectar</button>
           : <button onClick={() => { socket.disconnect(); setSocket(null) }}>Desconectar</button>}
       </div>
       <main ref={boardRef} className="board" onPointerDown={() => setSelectedId(null)}>

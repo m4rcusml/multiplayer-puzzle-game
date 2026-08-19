@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import io, { type Socket } from 'socket.io-client'
 import { Piece, type PuzzlePiece } from './components/piece'
+import { socketEndpoint } from './socket'
 
 const SNAP_DISTANCE = 0.08
 
@@ -80,7 +81,7 @@ function App() {
   }
 
   function connect() {
-    setSocket(io('http://localhost:3000'))
+    setSocket(io(socketEndpoint()))
   }
 
   function disconnect() {

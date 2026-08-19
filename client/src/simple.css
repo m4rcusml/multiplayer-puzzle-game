@@ -15,6 +15,7 @@ button { padding: .5rem .8rem; border: 0; border-radius: 0; background: #7545b5;
 .game { width: 100vw; height: 100svh; overflow: hidden; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
 .toolbar { position: absolute; z-index: 5; top: 1rem; left: 1rem; right: 1rem; margin: 0; }
+.game-error { position: absolute; z-index: 6; top: 3.75rem; left: 1rem; margin: 0; padding: .5rem .75rem; background: #fff; color: #b42318; box-shadow: 0 2px 8px #0002; }
 .board { position: relative; width: 100vw; height: 100svh; overflow: hidden; background: #fffdf9; touch-action: none; }
 .lock-area { position: absolute; z-index: 0; left: 15%; top: 15%; width: 70%; height: 70%; display: grid; border: 2px solid #cfc4b4; pointer-events: none; }
 .target { border: 1px dashed #cfc4b4; pointer-events: none; }

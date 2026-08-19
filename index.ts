@@ -2,16 +2,11 @@ import express from 'express'
 import { createServer } from 'http'
 import { randomBytes } from 'crypto'
 import { Server, type Socket } from 'socket.io'
+import { clampGroupDelta, type GeometryPiece } from './src/room-geometry.js'
 
-type Piece = {
-  id: string
-  x: number
-  y: number
-  targetX: number
-  targetY: number
+type Piece = GeometryPiece & {
   row: number
   column: number
-  groupId?: string
   locked: boolean
 }
 
@@ -22,7 +17,12 @@ type Room = {
   columns: number
   rows: number
   pieces: Piece[]
+  hostId: string
+  showLabels: boolean
+  locks: Map<string, string>
 }
+
+export type PublicRoom = Omit<Room, 'password' | 'locks' | 'hostId' | 'showLabels'>
 
 type RoomRequest = {
   roomId?: string
@@ -40,35 +40,159 @@ type GroupPieceUpdate = {
   groupId?: string
 }
 
+type GroupMoveData = {
+  pieces?: GroupPieceUpdate[]
+  sourceGroupId?: string
+}
+
 const app = express()
 const server = createServer(app)
+const clientOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  process.env.CLIENT_ORIGIN ?? 'https://tonetic-semiprovincially-raeann.ngrok-free.dev',
+]
 const io = new Server(server, {
-  cors: { origin: 'http://localhost:5173' },
+  cors: { origin: clientOrigins },
   maxHttpBufferSize: 8 * 1024 * 1024,
 })
 const rooms = new Map<string, Room>()
+
+export function publicRoom(room: Room): PublicRoom {
+  return { id: room.id, image: room.image, columns: room.columns, rows: room.rows, pieces: room.pieces }
+}
+
+export function roomSnapshot(room: Room, socketId: string) {
+  const snapshot: { room: PublicRoom; isHost: boolean; showLabels: boolean; roomPassword?: string } = { room: publicRoom(room), isHost: room.hostId === socketId, showLabels: room.showLabels }
+  if (snapshot.isHost) snapshot.roomPassword = room.password
+  return snapshot
+}
+
+export function claimGroup(room: Room, groupId: string, socketId: string): { ok: true } | { ok: false; error: string } {
+  const owner = room.locks.get(groupId)
+  if (owner && owner !== socketId) return { ok: false, error: 'Grupo em uso.' }
+  room.locks.set(groupId, socketId)
+  return { ok: true }
+}
+
+export function releaseGroup(room: Room, groupId: string, socketId: string): boolean {
+  if (room.locks.get(groupId) !== socketId) return false
+  room.locks.delete(groupId)
+  return true
+}
+
+export function assignHostIfMissing(room: Room, memberIds: Iterable<string>, nextHostId: string): boolean {
+  if (new Set(memberIds).has(room.hostId)) return false
+  room.hostId = nextHostId
+  return true
+}
+
+type RoomCreation = Omit<RoomRequest, 'roomId'> & { id?: string }
+
+export function createRoom(request: RoomCreation, hostId: string): Room {
+  const columns = request.columns ?? 2
+  const rows = request.rows ?? 2
+  const room: Room = { id: request.id ?? createRoomId(), password: request.password ?? '', image: request.image ?? '', columns, rows, pieces: createPieces(columns, rows), hostId, showLabels: false, locks: new Map() }
+  rooms.set(room.id, room)
+  return room
+}
 
 function createRoomId() {
   return randomBytes(3).toString('hex').toUpperCase()
 }
 
-function createPieces(columns: number, rows: number): Piece[] {
+function secureRandomUnit(): number {
+  return randomBytes(4).readUInt32BE(0) / 0x100000000
+}
+
+export function createPieces(columns: number, rows: number, random = secureRandomUnit): Piece[] {
   const count = columns * rows
+  const scatterSlots = Array.from({ length: count }, (_, index) => index)
+  for (let index = scatterSlots.length - 1; index > 0; index--) {
+    const randomIndex = Math.floor(random() * (index + 1))
+    ;[scatterSlots[index], scatterSlots[randomIndex]] = [scatterSlots[randomIndex]!, scatterSlots[index]!]
+  }
+
+  const pieceHeight = 0.7 / rows
+  const freeVerticalSpace = 1 - pieceHeight * rows
+  const verticalCenters = Array.from({ length: columns }, () => {
+    const weights = Array.from({ length: rows + 1 }, () => -Math.log(Math.max(Number.EPSILON, random())))
+    const totalWeight = weights.reduce((total, weight) => total + weight, 0)
+    const gaps = weights.map(weight => (weight / totalWeight) * freeVerticalSpace)
+    let cursor = gaps[0]!
+    return Array.from({ length: rows }, (_, row) => {
+      const center = cursor + pieceHeight / 2
+      cursor += pieceHeight + gaps[row + 1]!
+      return center
+    })
+  })
 
   return Array.from({ length: count }, (_, index) => {
     const row = Math.floor(index / columns)
     const column = index % columns
+    const scatterSlot = scatterSlots[index]!
+    const scatterColumn = scatterSlot % columns
+    const scatterRow = Math.floor(scatterSlot / columns)
+    const horizontalSlack = 0.3 / columns
+    const jitterX = (random() * 2 - 1) * horizontalSlack * 0.45
     return {
       id: `piece-${index + 1}`,
       row,
       column,
-      x: 0.08 + ((index * 0.37) % 0.84),
-      y: 0.08 + ((index * 0.61) % 0.84),
+      x: (scatterColumn + 0.5) / columns + jitterX,
+      y: verticalCenters[scatterColumn]![scatterRow]!,
       targetX: 0.15 + ((column + 0.5) / columns) * 0.7,
       targetY: 0.15 + ((row + 0.5) / rows) * 0.7,
+      columns,
+      rows,
       locked: false,
     }
   })
+}
+
+export function applyGroupMove(room: Room, data: GroupMoveData, socketId: string): { ok: boolean; pieces: Piece[] } {
+  if (!data.pieces?.length) return { ok: false, pieces: [] }
+
+  const sourceGroupId = typeof data.sourceGroupId === 'string' ? data.sourceGroupId : undefined
+  if (!sourceGroupId || room.locks.get(sourceGroupId) !== socketId) return { ok: false, pieces: [] }
+
+  const movingPieces = room.pieces.filter(piece => piece.groupId === sourceGroupId || (piece.groupId === undefined && piece.id === sourceGroupId))
+  const movingIds = new Set(movingPieces.map(piece => piece.id))
+  const anchorUpdate = data.pieces.find(update => typeof update.id === 'string' && movingIds.has(update.id) && Number.isFinite(update.x) && Number.isFinite(update.y))
+  const anchorPiece = anchorUpdate ? room.pieces.find(piece => piece.id === anchorUpdate.id) : undefined
+  if (!anchorUpdate || !anchorPiece) return { ok: false, pieces: movingPieces }
+
+  const updateById = new Map(data.pieces.map(update => [update.id, update]))
+  const destinationIds = new Set(movingPieces.map(piece => updateById.get(piece.id)?.groupId).filter((groupId): groupId is string => typeof groupId === 'string'))
+  if (destinationIds.size > 1) return { ok: false, pieces: movingPieces }
+  const destinationGroupId = destinationIds.values().next().value as string | undefined
+  if (destinationGroupId && destinationGroupId !== sourceGroupId) {
+    const destinationPieces = room.pieces.filter(piece => piece.groupId === destinationGroupId || (piece.groupId === undefined && piece.id === destinationGroupId))
+    const destinationOwner = room.locks.get(destinationGroupId)
+    if (destinationPieces.length === 0 || (destinationOwner && destinationOwner !== socketId)) return { ok: false, pieces: movingPieces }
+  }
+
+  const requestedDx = anchorUpdate.x! - anchorPiece.x
+  const requestedDy = anchorUpdate.y! - anchorPiece.y
+  const delta = clampGroupDelta(room.pieces, sourceGroupId, requestedDx, requestedDy)
+  if (destinationGroupId && destinationGroupId !== sourceGroupId && (Math.abs(delta.dx - requestedDx) > 1e-9 || Math.abs(delta.dy - requestedDy) > 1e-9)) {
+    return { ok: false, pieces: movingPieces }
+  }
+  for (const piece of movingPieces) {
+    const update = updateById.get(piece.id)
+    piece.x += delta.dx
+    piece.y += delta.dy
+    if (!update) continue
+    piece.locked = update.locked === true
+    if (typeof update.groupId === 'string') piece.groupId = update.groupId
+  }
+
+  return {
+    ok: true,
+    pieces: destinationGroupId && destinationGroupId !== sourceGroupId
+      ? room.pieces.filter(piece => piece.groupId === destinationGroupId || (piece.groupId === undefined && piece.id === destinationGroupId))
+      : movingPieces,
+  }
 }
 
 function validImage(image: unknown): image is string {
@@ -93,53 +217,67 @@ io.on('connection', socket => {
 
     let id = createRoomId()
     while (rooms.has(id)) id = createRoomId()
-    const room: Room = { id, password: request.password, image, columns, rows, pieces: createPieces(columns, rows) }
-    rooms.set(id, room)
+    const room = createRoom({ id, password: request.password, image, columns, rows }, socket.id)
     leaveRoom(socket)
     socket.join(id)
-    done({ ok: true, room })
+    done({ ok: true, ...roomSnapshot(room, socket.id) })
   })
 
   socket.on('join_room', (request: RoomRequest, done: (response: object) => void) => {
     const room = request.roomId ? rooms.get(request.roomId.toUpperCase()) : undefined
     if (!room || room.password !== request.password) return done({ ok: false, error: 'Sala ou senha inválida.' })
     leaveRoom(socket)
+    assignHostIfMissing(room, io.sockets.adapter.rooms.get(room.id) ?? [], socket.id)
     socket.join(room.id)
-    done({ ok: true, room })
+    done({ ok: true, ...roomSnapshot(room, socket.id) })
   })
 
-  socket.on('move_piece', (data: { roomId?: string; pieceId?: string; x?: number; y?: number; locked?: boolean; groupId?: string }) => {
-    if (!data.roomId || !socket.rooms.has(data.roomId)) return
+  socket.on('claim_group', (data: { roomId?: string; groupId?: string }, done: (response: object) => void) => {
+    if (!data.roomId || !data.groupId || !socket.rooms.has(data.roomId)) return done({ ok: false, error: 'Sala inválida.' })
     const room = rooms.get(data.roomId)
-    if (!room) return
-    const piece = room?.pieces.find(item => item.id === data.pieceId)
-    if (!piece || !Number.isFinite(data.x) || !Number.isFinite(data.y)) return
-
-    piece.x = Math.max(0, Math.min(1, data.x!))
-    piece.y = Math.max(0, Math.min(1, data.y!))
-    piece.locked = data.locked === true
-    piece.groupId = data.groupId
-    socket.to(room.id).emit('piece_moved', piece)
+    if (!room) return done({ ok: false, error: 'Sala inválida.' })
+    done(claimGroup(room, data.groupId, socket.id))
   })
 
-  socket.on('move_group', (data: { roomId?: string; pieces?: GroupPieceUpdate[] }) => {
-    if (!data.roomId || !socket.rooms.has(data.roomId) || !Array.isArray(data.pieces)) return
+  socket.on('release_group', (data: { roomId?: string; groupId?: string }) => {
+    if (!data.roomId || !data.groupId || !socket.rooms.has(data.roomId)) return
+    const room = rooms.get(data.roomId)
+    if (room) releaseGroup(room, data.groupId, socket.id)
+  })
+
+  socket.on('set_labels_visibility', (data: { roomId?: string; showLabels?: boolean }) => {
+    if (!data.roomId || typeof data.showLabels !== 'boolean' || !socket.rooms.has(data.roomId)) return
+    const room = rooms.get(data.roomId)
+    if (!room || room.hostId !== socket.id) return
+    room.showLabels = data.showLabels
+    io.to(room.id).emit('labels_visibility_changed', { showLabels: room.showLabels })
+  })
+
+  socket.on('move_group', (data: { roomId?: string } & GroupMoveData) => {
+    if (!data.roomId || !socket.rooms.has(data.roomId) || !data.pieces?.length) return
     const room = rooms.get(data.roomId)
     if (!room) return
-
-    const updatedPieces = data.pieces.flatMap(update => {
-      const piece = room.pieces.find(item => item.id === update.id)
-      if (!piece || !Number.isFinite(update.x) || !Number.isFinite(update.y)) return []
-
-      piece.x = Math.max(0, Math.min(1, update.x!))
-      piece.y = Math.max(0, Math.min(1, update.y!))
-      piece.locked = update.locked === true
-      piece.groupId = update.groupId
-      return [piece]
-    })
-
-    if (updatedPieces.length > 0) socket.to(room.id).emit('group_moved', updatedPieces)
+    const result = applyGroupMove(room, data, socket.id)
+    if (!result.ok) {
+      socket.emit('group_moved', room.pieces)
+      return
+    }
+    if (result.pieces.length > 0) io.to(room.id).emit('group_moved', result.pieces)
+  })
+  socket.on('disconnecting', () => {
+    const roomId = [...socket.rooms].find(room => room !== socket.id)
+    if (!roomId) return
+    const room = rooms.get(roomId)
+    if (!room) return
+    for (const [groupId, owner] of room.locks) if (owner === socket.id) room.locks.delete(groupId)
+    if (room.hostId !== socket.id) return
+    const members = [...(io.sockets.adapter.rooms.get(room.id) ?? [])].filter(id => id !== socket.id)
+    const nextHost = members[0]
+    if (!nextHost) return
+    room.hostId = nextHost
+    io.to(nextHost).emit('host_changed', { isHost: true, hostId: nextHost, roomPassword: room.password })
+    for (const member of members) if (member !== nextHost) io.to(member).emit('host_changed', { isHost: false, hostId: nextHost })
   })
 })
 
-server.listen(3000, () => console.log('Servidor rodando na porta 3000'))
+if (!process.env.NODE_TEST_CONTEXT) server.listen(3000, () => console.log('Servidor rodando na porta 3000'))

@@ -23,9 +23,10 @@ type PieceProps = {
   onPointerDown: (event: ReactPointerEvent<HTMLDivElement>, piece: PuzzlePiece) => void
   onPointerMove: (event: ReactPointerEvent<HTMLDivElement>, piece: PuzzlePiece) => void
   onPointerUp: (event: ReactPointerEvent<HTMLDivElement>, piece: PuzzlePiece) => void
+  onPointerCancel?: (event: ReactPointerEvent<HTMLDivElement>, piece: PuzzlePiece) => void
 }
 
-export function Piece({ piece, selected, showLabel = true, onPointerDown, onPointerMove, onPointerUp }: PieceProps) {
+export function Piece({ piece, selected, showLabel = true, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: PieceProps) {
   return (
     <div
       className={`piece${selected ? ' piece--selected' : ''}${piece.locked ? ' piece--locked' : ''}`}
@@ -46,6 +47,8 @@ export function Piece({ piece, selected, showLabel = true, onPointerDown, onPoin
       onPointerDown={event => { event.stopPropagation(); onPointerDown(event, piece) }}
       onPointerMove={event => onPointerMove(event, piece)}
       onPointerUp={event => onPointerUp(event, piece)}
+      onPointerCancel={event => onPointerCancel?.(event, piece)}
+      onLostPointerCapture={event => onPointerCancel?.(event, piece)}
     >
       {showLabel ? piece.id.replace('piece-', '') : ''}
     </div>
