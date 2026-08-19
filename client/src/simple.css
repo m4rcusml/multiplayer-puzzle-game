@@ -1,0 +1,23 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: #f5f2ed; color: #302b36; }
+button { padding: .5rem .8rem; border: 0; border-radius: 0; background: #7545b5; color: white; cursor: pointer; }
+.lobby { width: min(420px, 92vw); margin: 5rem auto; padding: 2rem; border-radius: 0; background: white; box-shadow: 0 5px 20px #0001; }
+.lobby h1 { margin-top: 0; }
+.lobby label { display: block; margin: 1rem 0; }
+.lobby input { display: block; width: 100%; margin-top: .35rem; padding: .55rem; }
+.dimensions { display: flex; gap: 1rem; }
+.dimensions label { flex: 1; }
+.tabs { display: flex; gap: .5rem; margin: 1.5rem 0; }
+.tabs button { background: #ddd6e5; color: #302b36; }
+.tabs button.active { background: #7545b5; color: white; }
+.preview { display: block; width: 100%; max-height: 180px; object-fit: contain; margin: 1rem 0; }
+.error { color: #b42318; font-size: .9rem; }
+.game { width: 100vw; height: 100svh; overflow: hidden; }
+.toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+.toolbar { position: absolute; z-index: 5; top: 1rem; left: 1rem; right: 1rem; margin: 0; }
+.board { position: relative; width: 100vw; height: 100svh; overflow: hidden; background: #fffdf9; touch-action: none; }
+.lock-area { position: absolute; z-index: 0; left: 15%; top: 15%; width: 70%; height: 70%; display: grid; border: 2px solid #cfc4b4; pointer-events: none; }
+.target { border: 1px dashed #cfc4b4; pointer-events: none; }
+.piece { position: absolute; z-index: 1; transform: translate(-50%, -50%); display: grid; place-items: center; border: 1px solid white; color: white; font-weight: bold; cursor: grab; user-select: none; touch-action: none; background-repeat: no-repeat; }
+.piece--selected { z-index: 2; outline: 3px solid #7545b5; cursor: grabbing; }
+.piece--locked { cursor: grab; opacity: 1; }

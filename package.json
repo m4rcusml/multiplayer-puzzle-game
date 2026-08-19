@@ -1,0 +1,33 @@
+{
+  "name": "multiplayer-puzzle",
+  "version": "1.0.0",
+  "description": "Multiplayer puzzle game using image manipulation and web socket connection.",
+  "license": "ISC",
+  "author": "Mililitro",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "tsx watch index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.2.0",
+    "nodemon": "^3.1.14",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "path": "^0.12.7",
+    "sharp": "^0.35.3",
+    "socket.io": "^4.8.3"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
